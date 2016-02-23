@@ -1,9 +1,9 @@
-(Yet Another) Lisp
+(Yet Another) not-quite Lisp
 ==================
 
-A basic, barebones lisp interpreter in Rust.
+A basic, barebones s-expression evaluator in Rust.
 
-This is a port of an existing interpreter in C. The hope is to create a working interpreter that maintains the semantics of the original without deviating too far from idiomatic rust code.
+This is a port of an existing implementation in C. The hope is to create a working interpreter that maintains the semantics of the original without deviating too far from idiomatic rust code.
 
 Some goals:
 -----------
