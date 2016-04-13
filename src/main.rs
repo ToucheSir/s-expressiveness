@@ -1,18 +1,23 @@
 use std::io;
 use std::io::prelude::*;
 
+type CellIndex = usize;
+type SymbolIndex = usize;
+
+const NIL_INDEX: CellIndex = 0;
+
 #[derive(Copy, Clone, Debug)]
 enum CellType {
     Number(i32),
-    Symbol(usize),
-    Cons(usize),
+    Symbol(SymbolIndex),
+    Cons(CellIndex),
     Free,
 }
 
 #[derive(Copy, Clone, Debug)]
 struct Cell {
     val: CellType,
-    tail: usize,
+    tail: CellIndex,
 }
 impl Cell {
     fn empty() -> Cell {
@@ -21,7 +26,7 @@ impl Cell {
             tail: NIL_INDEX,
         }
     }
-    fn new(val: CellType, tail: usize) -> Self {
+    fn new(val: CellType, tail: CellIndex) -> Self {
         Cell {
             val: val,
             tail: tail,
@@ -37,7 +42,7 @@ impl Env {
         Env { symbols: Vec::new() }
     }
 
-    fn add_sym(&mut self, name: String) -> usize {
+    fn add_sym(&mut self, name: String) -> SymbolIndex {
         match self.symbols.iter().position(|s| &name == s) {
             Some(idx) => idx,
             None => {
@@ -49,15 +54,15 @@ impl Env {
 }
 
 struct DefaultNS {
-    add: usize,
-    sub: usize,
-    mul: usize,
-    div: usize,
-    modu: usize,
-    cons: usize,
-    hd: usize,
-    tl: usize,
-    quote: usize,
+    add: SymbolIndex,
+    sub: SymbolIndex,
+    mul: SymbolIndex,
+    div: SymbolIndex,
+    modu: SymbolIndex,
+    cons: SymbolIndex,
+    hd: SymbolIndex,
+    tl: SymbolIndex,
+    quote: SymbolIndex,
 }
 impl DefaultNS {
     fn new(env: &mut Env) -> Self {
@@ -75,14 +80,11 @@ impl DefaultNS {
     }
 }
 
-const NIL_INDEX: usize = 0;
-
 #[derive(Debug, PartialEq)]
 enum Token {
     LeftParen,
     RightParen,
     Dot,
-    // Quote,
     Number(String),
     Symbol(String),
 }
@@ -97,7 +99,7 @@ impl<'a> Parser<'a> {
         self.pos >= self.input.len()
     }
 
-    fn parse_sexp(&mut self, storage: &mut CellStorage) -> usize {
+    fn parse_sexp(&mut self, storage: &mut CellStorage) -> CellIndex {
         match self.next_token() {
             Token::Number(str_num) => {
                 let nval = str_num.parse::<i32>().unwrap();
@@ -113,7 +115,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_sexps(&mut self, storage: &mut CellStorage) -> usize {
+    fn parse_sexps(&mut self, storage: &mut CellStorage) -> CellIndex {
         match self.peek_ch() {
             ')' => NIL_INDEX,
             _ => {
@@ -194,7 +196,7 @@ impl<'a> Parser<'a> {
 
 #[derive(Debug)]
 struct CellStorage<'a> {
-    free_index: usize,
+    free_index: CellIndex,
     cells: &'a mut [Cell],
 }
 impl<'a> CellStorage<'a> {
@@ -204,7 +206,7 @@ impl<'a> CellStorage<'a> {
             free_index: NIL_INDEX + 1,
         }
     }
-    fn alloc_cell(&mut self, val: CellType) -> usize {
+    fn alloc_cell(&mut self, val: CellType) -> CellIndex {
         if self.free_index == NIL_INDEX {
             panic!("Exhausted cell storage!");
         } else {
@@ -215,7 +217,7 @@ impl<'a> CellStorage<'a> {
             idx
         }
     }
-    fn free_cell(&mut self, idx: usize) {
+    fn free_cell(&mut self, idx: CellIndex) {
         match self.cells[idx].val {
             CellType::Number(_) | CellType::Symbol(_) => {
                 self.cells[idx] = Cell::new(CellType::Free, self.free_index);
@@ -232,18 +234,18 @@ impl<'a> CellStorage<'a> {
         }
     }
 
-    fn get(&self, idx: usize) -> Cell {
+    fn get(&self, idx: CellIndex) -> Cell {
         self.cells[idx]
     }
-    fn val_of(&self, idx: usize) -> CellType {
+    fn val_of(&self, idx: CellIndex) -> CellType {
         self.cells[idx].val
     }
-    fn tail_of(&self, idx: usize) -> usize {
+    fn tail_of(&self, idx: CellIndex) -> CellIndex {
         self.cells[idx].tail
     }
 }
 
-fn print_exp(idx: usize, storage: &CellStorage, env: &Env) {
+fn print_exp(idx: CellIndex, storage: &CellStorage, env: &Env) {
     if idx == NIL_INDEX {
         print!("()");
     } else {
@@ -260,7 +262,7 @@ fn print_exp(idx: usize, storage: &CellStorage, env: &Env) {
     }
 }
 
-fn print_list(idx: usize, storage: &CellStorage, env: &Env) {
+fn print_list(idx: CellIndex, storage: &CellStorage, env: &Env) {
     print!("(");
     let mut exp = idx;
     let mut cell = storage.get(exp);
@@ -268,14 +270,14 @@ fn print_list(idx: usize, storage: &CellStorage, env: &Env) {
     if let CellType::Cons(head) = cell.val {
         print_exp(head, storage, env);
         exp = cell.tail;
-        cell = storage.cells[exp];
+        cell = storage.get(exp);
     }
 
     while let CellType::Cons(head) = cell.val {
         print!(" ");
         print_exp(head, storage, env);
         exp = cell.tail;
-        cell = storage.cells[exp];
+        cell = storage.get(exp);
     }
 
     if exp != NIL_INDEX {
@@ -285,7 +287,7 @@ fn print_list(idx: usize, storage: &CellStorage, env: &Env) {
     print!(")");
 }
 
-fn s_exp(buf: &Vec<u8>, storage: &mut CellStorage, env: &mut Env) -> usize {
+fn s_exp(buf: &Vec<u8>, storage: &mut CellStorage, env: &mut Env) -> CellIndex {
     let mut parser = Parser {
         input: buf,
         pos: 0,
@@ -314,116 +316,162 @@ macro_rules! cdr {
     }
 }
 
-fn is_cons(exp: usize, cells: &CellStorage) -> bool {
+fn is_cons(exp: CellIndex, cells: &CellStorage) -> bool {
     match cells.val_of(exp) {
         CellType::Cons(_) => true,
         _ => false,
     }
 }
 
-fn is_unary(exp: usize, cells: &CellStorage) -> bool {
+fn is_unary(exp: CellIndex, cells: &CellStorage) -> bool {
     is_cons(cdr!(exp, cells), cells) && cdr!(cdr!(exp, cells), cells) == NIL_INDEX
 }
 
-fn is_binary(exp: usize, cells: &CellStorage) -> bool {
+fn is_binary(exp: CellIndex, cells: &CellStorage) -> bool {
     is_cons(cdr!(exp, cells), cells) && is_cons(cdr!(cdr!(exp, cells), cells), cells) &&
     (cdr!(cdr!(cdr!(exp, cells), cells), cells) == NIL_INDEX)
 }
 
-#[allow(dead_code)]
 #[derive(Debug)]
 enum EvalError {
     IllegalOperator,
     NonUnary,
-    NotCons(usize),
+    NotCons(CellIndex),
     NonBinary,
     NonNumeric,
-    UnknownOperator(usize),
+    UnknownOperator(SymbolIndex),
 }
 
-fn eval(exp: usize, cells: &mut CellStorage, env: &mut Env, ns: &DefaultNS) -> Result<usize, EvalError> {
-    let cell = cells.get(exp);
-    match cell.val {
-        CellType::Number(_) | CellType::Symbol(_) => Ok(exp),
-        CellType::Cons(head) => {
-            if let CellType::Symbol(op) = cells.val_of(head) {
-                if op == ns.quote {
-                    if !is_unary(exp, cells) {
-                        Err(EvalError::NonUnary)
-                    } else {
-                        Ok(car!(cdr!(exp, cells), cells))
-                    }
-                } else if op == ns.hd || op == ns.tl {
-                    if !is_unary(exp, cells) {
-                        Err(EvalError::NonUnary)
-                    } else {
-                        let res = try!(eval(car!(cdr!(exp, cells), cells), cells, env, ns));
-                        if !is_cons(res, cells) {
-                            Err(EvalError::NotCons(exp))
-                        } else if op == ns.hd {
-                            Ok(car!(res, cells))
-                        } else {
-                            Ok(cdr!(res, cells))
-                        }
-                    }
-                } else if op == ns.cons {
-                    if !is_binary(exp, cells) {
-                        Err(EvalError::NonBinary)
-                    } else {
-                        let head = try!(eval(car!(cdr!(exp, cells), cells), cells, env, ns));
-                        let tail = try!(eval(car!(cdr!(cdr!(exp, cells), cells), cells),
-                                             cells,
-                                             env,
-                                             ns));
-                        let cons_cell = cells.alloc_cell(CellType::Cons(head));
-                        cells.get(cons_cell).tail = tail;
-                        Ok(cons_cell)
-                    }
-                } else if op == ns.add || op == ns.sub || op == ns.mul || op == ns.div || op == ns.modu {
-                    if !is_binary(exp, cells) {
-                        Err(EvalError::NonBinary)
-                    } else {
-                        let lhs = try!(eval(car!(cdr!(exp, cells), cells), cells, env, ns));
-                        let rhs = try!(eval(car!(cdr!(cdr!(exp, cells), cells), cells),
-                                            cells,
-                                            env,
-                                            ns));
+fn is_atom(exp: CellIndex, cells: &CellStorage) -> bool {
+    match cells.val_of(exp) {
+        CellType::Number(_) | CellType::Symbol(_) => true,
+        _ => exp == NIL_INDEX,
+    }
+}
 
-                        match (cells.val_of(lhs), cells.val_of(rhs)) {
-                            (CellType::Number(a), CellType::Number(b)) => {
-                                Ok(cells.alloc_cell(CellType::Number(if op == ns.add {
-                                    a + b
-                                } else if op == ns.sub {
-                                    a - b
-                                } else if op == ns.mul {
-                                    a * b
-                                } else if op == ns.div {
-                                    a / b
-                                } else {
-                                    // if op == ns.modu
-                                    a % b
-                                })))
-                            }
-                            _ => Err(EvalError::NonNumeric),
-                        }
-                    }
+fn split_binary(exp: CellIndex, cells: &CellStorage) -> (CellIndex, CellIndex) {
+    let head = car!(cdr!(exp, cells), cells);
+    let tail = car!(cdr!(cdr!(exp, cells), cells), cells);
+    (head, tail)
+}
+
+fn eval_cons(exp: CellIndex,
+             cells: &mut CellStorage,
+             env: &mut Env,
+             ns: &DefaultNS)
+             -> Result<CellIndex, EvalError> {
+    if !is_binary(exp, cells) {
+        Err(EvalError::NonBinary)
+    } else {
+        let (head, tail) = split_binary(exp, cells);
+        let head = try!(eval(head, cells, env, ns));
+        let tail = try!(eval(tail, cells, env, ns));
+        let cons_cell = cells.alloc_cell(CellType::Cons(head));
+        cells.get(cons_cell).tail = tail;
+        Ok(cons_cell)
+    }
+}
+
+fn eval_arithmetic(op: SymbolIndex,
+                   exp: CellIndex,
+                   cells: &mut CellStorage,
+                   env: &mut Env,
+                   ns: &DefaultNS)
+                   -> Result<CellIndex, EvalError> {
+    if !is_binary(exp, cells) {
+        Err(EvalError::NonBinary)
+    } else {
+        let (head, tail) = split_binary(exp, cells);
+        let lhs = try!(eval(head, cells, env, ns));
+        let rhs = try!(eval(tail, cells, env, ns));
+        match (cells.val_of(lhs), cells.val_of(rhs)) {
+            (CellType::Number(a), CellType::Number(b)) => {
+                Ok(cells.alloc_cell(CellType::Number(if op == ns.add {
+                    a + b
+                } else if op == ns.sub {
+                    a - b
+                } else if op == ns.mul {
+                    a * b
+                } else if op == ns.div {
+                    a / b
                 } else {
-                    Err(EvalError::UnknownOperator(op))
-                }
-            } else {
-                Err(EvalError::IllegalOperator)
+                    // if op == ns.modu
+                    a % b
+                })))
             }
-        }
-        _ => {
-            if exp == NIL_INDEX {
-                Ok(NIL_INDEX)
-            } else {
-                panic!("Invalid expression")
-            }
+            _ => Err(EvalError::NonNumeric),
         }
     }
 }
 
+fn eval(exp: CellIndex,
+        cells: &mut CellStorage,
+        env: &mut Env,
+        ns: &DefaultNS)
+        -> Result<CellIndex, EvalError> {
+    let cell = cells.get(exp);
+    if is_atom(exp, cells) {
+        Ok(exp)
+    } else if let CellType::Cons(head) = cell.val {
+        if let CellType::Symbol(op) = cells.val_of(head) {
+            if op == ns.quote {
+                if !is_unary(exp, cells) {
+                    Err(EvalError::NonUnary)
+                } else {
+                    Ok(car!(cdr!(exp, cells), cells))
+                }
+            } else if op == ns.hd || op == ns.tl {
+                if !is_unary(exp, cells) {
+                    Err(EvalError::NonUnary)
+                } else {
+                    let res = try!(eval(car!(cdr!(exp, cells), cells), cells, env, ns));
+                    if !is_cons(res, cells) {
+                        Err(EvalError::NotCons(exp))
+                    } else if op == ns.hd {
+                        Ok(car!(res, cells))
+                    } else {
+                        Ok(cdr!(res, cells))
+                    }
+                }
+            } else if op == ns.cons {
+                eval_cons(exp, cells, env, ns)
+            } else if op == ns.add || op == ns.sub || op == ns.mul || op == ns.div || op == ns.modu {
+                eval_arithmetic(op, exp, cells, env, ns)
+            } else {
+                Err(EvalError::UnknownOperator(op))
+            }
+        } else {
+            Err(EvalError::IllegalOperator)
+        }
+    } else {
+        panic!("Invalid expression")
+    }
+}
+
+fn display_err(err_type: EvalError, cells: &CellStorage, env: &Env) {
+    print!("\nError: ");
+    match err_type {
+        EvalError::IllegalOperator => {
+            println!("illegal operator!");
+        }
+        EvalError::NonUnary => {
+            println!("non unary expression!");
+        }
+        EvalError::NotCons(exp) => {
+            print_exp(exp, cells, env);
+            println!(" does not evaluate to a cons pair!");
+        }
+        EvalError::NonBinary => {
+            println!("non binary expression!");
+        }
+        EvalError::NonNumeric => {
+            println!("non unary expression!");
+        }
+        EvalError::UnknownOperator(op) => {
+            println!("unknown operator '{}'", env.symbols[op]);
+        }
+    }
+}
 
 fn init_storage(buf: &mut [Cell]) -> CellStorage {
     for idx in 1..buf.len() - 1 {
@@ -464,7 +512,7 @@ fn main() {
                 println!("");
             }
             Err(err_type) => {
-                println!("\n{:?}", err_type);
+                display_err(err_type, &storage, &env);
             }
         }
 
