@@ -160,7 +160,8 @@ impl<'a> Parser<'a> {
             }
             '\'' => {
                 self.next_ch();
-                Token::Quote
+                // Token::Quote
+                Token::Symbol(String::from("'"))
             }
             _ => {
                 if ch.is_digit(10) {
@@ -429,7 +430,11 @@ fn eval(exp: usize,
                 Err(1)
             }
         }
-        _ => panic!("Invalid expression"),
+        _ => if exp == NIL_INDEX {
+            Ok(NIL_INDEX)
+        } else {
+            panic!("Invalid expression")
+        }
     }
 }
 
@@ -454,7 +459,7 @@ fn main() {
     let mut output = io::stdout();
 
     loop {
-        print!("[] ");
+        print!("[0] ");
         output.flush().unwrap();
         input.read_until(b'\n', &mut buf).unwrap();
         let idx = s_exp(&buf, &mut storage, &mut env);
