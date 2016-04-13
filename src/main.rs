@@ -82,7 +82,7 @@ enum Token {
     LeftParen,
     RightParen,
     Dot,
-    Quote,
+    // Quote,
     Number(String),
     Symbol(String),
 }
@@ -247,7 +247,7 @@ fn print_exp(idx: usize, storage: &CellStorage, env: &Env) {
     if idx == NIL_INDEX {
         print!("()");
     } else {
-        match storage.cells[idx].val {
+        match storage.get(idx).val {
             CellType::Symbol(sym) => {
                 print!("{}", env.symbols[sym]);
             }
@@ -263,7 +263,7 @@ fn print_exp(idx: usize, storage: &CellStorage, env: &Env) {
 fn print_list(idx: usize, storage: &CellStorage, env: &Env) {
     print!("(");
     let mut exp = idx;
-    let mut cell = storage.cells[exp];
+    let mut cell = storage.get(exp);
 
     if let CellType::Cons(head) = cell.val {
         print_exp(head, storage, env);
@@ -295,8 +295,8 @@ fn s_exp(buf: &Vec<u8>, storage: &mut CellStorage, env: &mut Env) -> usize {
 }
 
 macro_rules! car {
-    ($exp: expr, $cells: expr) => {
-        if let CellType::Cons(head) = $cells[$exp].val {
+    ($exp: expr, $storage: expr) => {
+        if let CellType::Cons(head) = $storage.get($exp).val {
             head
         } else {
             panic!("Not a cons cell")
@@ -305,109 +305,93 @@ macro_rules! car {
 }
 
 macro_rules! cdr {
-    ($exp: expr, $cells: expr) => {
-        if let CellType::Cons(_) = $cells[$exp].val {
-            $cells[$exp].tail
+    ($exp: expr, $storage: expr) => {
+        if let CellType::Cons(_) = $storage.val_of($exp) {
+            $storage.tail_of($exp)
         } else {
             NIL_INDEX
         }
     }
 }
 
-fn is_atom(exp: usize, cells: &[Cell]) -> bool {
-    match cells[exp].val {
-        CellType::Number(_) | CellType::Symbol(_) => true,
-        _ => false,
-    }
-}
-
-fn is_cons(exp: usize, cells: &[Cell]) -> bool {
-    match cells[exp].val {
+fn is_cons(exp: usize, cells: &CellStorage) -> bool {
+    match cells.val_of(exp) {
         CellType::Cons(_) => true,
         _ => false,
     }
 }
 
-fn is_unary(exp: usize, cells: &[Cell]) -> bool {
+fn is_unary(exp: usize, cells: &CellStorage) -> bool {
     is_cons(cdr!(exp, cells), cells) && cdr!(cdr!(exp, cells), cells) == NIL_INDEX
 }
 
-fn is_binary(exp: usize, cells: &[Cell]) -> bool {
-    is_cons(cdr!(exp, cells), cells) //&& is_cons(cdr!(cdr!(exp, cells), cells), cells)
-        // && (cdr!(cdr!(cdr!(exp, cells), cells), cells) == NIL_INDEX)
+fn is_binary(exp: usize, cells: &CellStorage) -> bool {
+    is_cons(cdr!(exp, cells), cells) && is_cons(cdr!(cdr!(exp, cells), cells), cells) &&
+    (cdr!(cdr!(cdr!(exp, cells), cells), cells) == NIL_INDEX)
 }
 
-enum SyntaxError {
+#[allow(dead_code)]
+#[derive(Debug)]
+enum EvalError {
     IllegalOperator,
     NonUnary,
-    NotCons,
+    NotCons(usize),
     NonBinary,
     NonNumeric,
-    UnknownOperator,
+    UnknownOperator(usize),
 }
 
-fn eval(exp: usize,
-        storage: &mut CellStorage,
-        env: &mut Env,
-        ns: &DefaultNS)
-        -> Result<usize, u32> {
-    let cell = storage.cells[exp];
+fn eval(exp: usize, cells: &mut CellStorage, env: &mut Env, ns: &DefaultNS) -> Result<usize, EvalError> {
+    let cell = cells.get(exp);
     match cell.val {
         CellType::Number(_) | CellType::Symbol(_) => Ok(exp),
         CellType::Cons(head) => {
-            if let CellType::Symbol(op) = storage.cells[head].val {
+            if let CellType::Symbol(op) = cells.val_of(head) {
                 if op == ns.quote {
-                    if !is_unary(exp, storage.cells) {
-                        Err(2)
+                    if !is_unary(exp, cells) {
+                        Err(EvalError::NonUnary)
                     } else {
-                        Ok(car!(cdr!(exp, storage.cells), storage.cells))
+                        Ok(car!(cdr!(exp, cells), cells))
                     }
                 } else if op == ns.hd || op == ns.tl {
-                    if !is_unary(exp, storage.cells) {
-                        Err(2)
+                    if !is_unary(exp, cells) {
+                        Err(EvalError::NonUnary)
                     } else {
-                        let res = try!(eval(car!(cdr!(exp, storage.cells), storage.cells),
-                                            storage,
-                                            env,
-                                            ns));
-                        if op == ns.hd {
-                            Ok(car!(res, storage.cells))
+                        let res = try!(eval(car!(cdr!(exp, cells), cells), cells, env, ns));
+                        if !is_cons(res, cells) {
+                            Err(EvalError::NotCons(exp))
+                        } else if op == ns.hd {
+                            Ok(car!(res, cells))
                         } else {
-                            Ok(cdr!(res, storage.cells))
+                            Ok(cdr!(res, cells))
                         }
                     }
                 } else if op == ns.cons {
-                    if !is_binary(exp, storage.cells) {
-                        Err(6)
+                    if !is_binary(exp, cells) {
+                        Err(EvalError::NonBinary)
                     } else {
-                        let head = try!(eval(car!(cdr!(exp, storage.cells), storage.cells),
-                                           storage, env, ns));
-                        let tail = try!(eval(car!(cdr!(cdr!(exp, storage.cells), storage.cells),
-                                                  storage.cells),
-                                             storage,
+                        let head = try!(eval(car!(cdr!(exp, cells), cells), cells, env, ns));
+                        let tail = try!(eval(car!(cdr!(cdr!(exp, cells), cells), cells),
+                                             cells,
                                              env,
                                              ns));
-                        let cons_cell = storage.alloc_cell(CellType::Cons(head));
-                        storage.cells[cons_cell].tail = tail;
+                        let cons_cell = cells.alloc_cell(CellType::Cons(head));
+                        cells.get(cons_cell).tail = tail;
                         Ok(cons_cell)
                     }
                 } else if op == ns.add || op == ns.sub || op == ns.mul || op == ns.div || op == ns.modu {
-                    if !is_binary(exp, storage.cells) {
-                        Err(3)
+                    if !is_binary(exp, cells) {
+                        Err(EvalError::NonBinary)
                     } else {
-                        let lhs = try!(eval(car!(cdr!(exp, storage.cells), storage.cells),
-                                            storage,
-                                            env,
-                                            ns));
-                        let rhs = try!(eval(car!(cdr!(cdr!(exp, storage.cells), storage.cells),
-                                                 storage.cells),
-                                            storage,
+                        let lhs = try!(eval(car!(cdr!(exp, cells), cells), cells, env, ns));
+                        let rhs = try!(eval(car!(cdr!(cdr!(exp, cells), cells), cells),
+                                            cells,
                                             env,
                                             ns));
 
-                        match (storage.val_of(lhs), storage.val_of(rhs)) {
+                        match (cells.val_of(lhs), cells.val_of(rhs)) {
                             (CellType::Number(a), CellType::Number(b)) => {
-                                Ok(storage.alloc_cell(CellType::Number(if op == ns.add {
+                                Ok(cells.alloc_cell(CellType::Number(if op == ns.add {
                                     a + b
                                 } else if op == ns.sub {
                                     a - b
@@ -420,20 +404,22 @@ fn eval(exp: usize,
                                     a % b
                                 })))
                             }
-                            _ => Err(4),
+                            _ => Err(EvalError::NonNumeric),
                         }
                     }
                 } else {
-                    Err(5)
+                    Err(EvalError::UnknownOperator(op))
                 }
             } else {
-                Err(1)
+                Err(EvalError::IllegalOperator)
             }
         }
-        _ => if exp == NIL_INDEX {
-            Ok(NIL_INDEX)
-        } else {
-            panic!("Invalid expression")
+        _ => {
+            if exp == NIL_INDEX {
+                Ok(NIL_INDEX)
+            } else {
+                panic!("Invalid expression")
+            }
         }
     }
 }
@@ -454,14 +440,19 @@ fn main() {
 
     println!("An S-expression Evaluator.");
     let stdin = io::stdin();
-    let mut buf = Vec::new();
+    let mut buf = Vec::with_capacity(64);
     let mut input = stdin.lock();
     let mut output = io::stdout();
 
     loop {
         print!("[0] ");
         output.flush().unwrap();
-        input.read_until(b'\n', &mut buf).unwrap();
+        if let Ok(n) = input.read_until(b'\n', &mut buf) {
+            // Check for EOF
+            if n == 0 {
+                break;
+            }
+        }
         let idx = s_exp(&buf, &mut storage, &mut env);
 
         print_exp(idx, &mut storage, &env);
@@ -472,7 +463,9 @@ fn main() {
                 storage.free_cell(exp);
                 println!("");
             }
-            _ => {}
+            Err(err_type) => {
+                println!("\n{:?}", err_type);
+            }
         }
 
         storage.free_cell(idx);
@@ -480,5 +473,5 @@ fn main() {
         buf.clear();
     }
 
-    println!("End.");
+    println!("\nEnd.");
 }
