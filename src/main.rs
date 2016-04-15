@@ -28,9 +28,14 @@ fn s_exp(input: &mut io::StdinLock,
                 return None;
             }
         }
+        // println!("{}", String::from_utf8_lossy(buf));
         match parser.parse(buf, storage) {
-            Some(idx) => return Some(idx),
-            _ => continue,
+            Ok(idx) => return Some(idx),
+            Err(ParseError::SyntaxError(ch)) => {
+                println!("Syntax error at '{}'", ch);
+                buf.clear();
+            }
+            _ => {}
         }
     }
 }
